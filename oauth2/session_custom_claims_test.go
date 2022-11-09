@@ -18,7 +18,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createSessionWithCustomClaims(extra map[string]interface{}, allowedTopLevelClaims []string) oauth2.Session {
+func createSessionWithCustomClaims(
+	extra map[string]interface{},
+	allowedTopLevelClaims []string,
+	mirrorTopLevelClaims bool,
+) oauth2.Session {
 	session := &oauth2.Session{
 		DefaultSession: &openid.DefaultSession{
 			Claims: &jwt.IDTokenClaims{
@@ -30,6 +34,7 @@ func createSessionWithCustomClaims(extra map[string]interface{}, allowedTopLevel
 		},
 		Extra:                 extra,
 		AllowedTopLevelClaims: allowedTopLevelClaims,
+		MirrorTopLevelClaims:  mirrorTopLevelClaims,
 	}
 	return *session
 }
@@ -41,7 +46,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 	t.Run("no_custom_claims", func(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{})
 
-		session := createSessionWithCustomClaims(nil, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(nil, c.AllowedTopLevelClaims(ctx), true)
 		claims := session.GetJWTClaims().ToMapClaims()
 
 		assert.EqualValues(t, "alice", claims["sub"])
@@ -56,7 +61,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"foo"})
 		extra := map[string]interface{}{"foo": "bar"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -76,11 +81,33 @@ func TestCustomClaimsInSession(t *testing.T) {
 		require.Contains(t, extClaims, "foo")
 		assert.EqualValues(t, "bar", extClaims["foo"])
 	})
+	t.Run("custom_claim_does_not_get_mirrored_if_specified", func(t *testing.T) {
+		extra := map[string]interface{}{"foo": "bar"}
+
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), false)
+
+		claims := session.GetJWTClaims().ToMapClaims()
+
+		assert.EqualValues(t, "alice", claims["sub"])
+		assert.NotEqual(t, "another-alice", claims["sub"])
+
+		require.Contains(t, claims, "iss")
+		assert.EqualValues(t, "hydra.localhost", claims["iss"])
+
+		require.Contains(t, claims, "foo")
+		assert.EqualValues(t, "bar", claims["foo"])
+
+		require.Contains(t, claims, "ext")
+		extClaims, ok := claims["ext"].(map[string]interface{})
+		require.True(t, ok)
+
+		require.NotContains(t, extClaims, "foo")
+	})
 	t.Run("only_non_reserved_claims_get_mirrored", func(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"foo", "iss", "sub"})
 		extra := map[string]interface{}{"foo": "bar", "iss": "hydra.remote", "sub": "another-alice"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -111,7 +138,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{})
 		extra := map[string]interface{}{"foo": "bar", "iss": "hydra.remote", "sub": "another-alice"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -140,7 +167,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"foo", "baz", "bar", "iss"})
 		extra := map[string]interface{}{"foo": "foo_value", "sub": "another-alice"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -166,9 +193,14 @@ func TestCustomClaimsInSession(t *testing.T) {
 	})
 	t.Run("less_config_claims_than_given", func(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"foo", "sub"})
-		extra := map[string]interface{}{"foo": "foo_value", "bar": "bar_value", "baz": "baz_value", "sub": "another-alice"}
+		extra := map[string]interface{}{
+			"foo": "foo_value",
+			"bar": "bar_value",
+			"baz": "baz_value",
+			"sub": "another-alice",
+		}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -198,7 +230,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"foo", "bar"})
 		extra := map[string]interface{}{"foo": "foo_value", "baz": "baz_value", "sub": "another-alice"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 
@@ -228,7 +260,7 @@ func TestCustomClaimsInSession(t *testing.T) {
 		c.MustSet(ctx, config.KeyAllowedTopLevelClaims, []string{"iss", "sub"})
 		extra := map[string]interface{}{"iss": "hydra.remote", "sub": "another-alice"}
 
-		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx))
+		session := createSessionWithCustomClaims(extra, c.AllowedTopLevelClaims(ctx), true)
 
 		claims := session.GetJWTClaims().ToMapClaims()
 

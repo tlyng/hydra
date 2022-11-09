@@ -65,7 +65,11 @@ func NewHandler(r InternalRegistry, c *config.DefaultProvider) *Handler {
 	return &Handler{r: r, c: c}
 }
 
-func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.RouterPublic, corsMiddleware func(http.Handler) http.Handler) {
+func (h *Handler) SetRoutes(
+	admin *httprouterx.RouterAdmin,
+	public *httprouterx.RouterPublic,
+	corsMiddleware func(http.Handler) http.Handler,
+) {
 	public.Handler("OPTIONS", TokenPath, corsMiddleware(http.HandlerFunc(h.handleOptions)))
 	public.Handler("POST", TokenPath, corsMiddleware(http.HandlerFunc(h.oauth2TokenExchange)))
 
@@ -413,22 +417,39 @@ func (h *Handler) discoverOidcConfiguration(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.r.Writer().Write(w, r, &oidcConfiguration{
-		Issuer:                                 h.c.IssuerURL(r.Context()).String(),
-		AuthURL:                                h.c.OAuth2AuthURL(r.Context()).String(),
-		TokenURL:                               h.c.OAuth2TokenURL(r.Context()).String(),
-		JWKsURI:                                h.c.JWKSURL(r.Context()).String(),
-		RevocationEndpoint:                     urlx.AppendPaths(h.c.IssuerURL(r.Context()), RevocationPath).String(),
-		RegistrationEndpoint:                   h.c.OAuth2ClientRegistrationURL(r.Context()).String(),
-		SubjectTypes:                           h.c.SubjectTypesSupported(r.Context()),
-		ResponseTypes:                          []string{"code", "code id_token", "id_token", "token id_token", "token", "token id_token code"},
-		ClaimsSupported:                        h.c.OIDCDiscoverySupportedClaims(r.Context()),
-		ScopesSupported:                        h.c.OIDCDiscoverySupportedScope(r.Context()),
-		UserinfoEndpoint:                       h.c.OIDCDiscoveryUserinfoEndpoint(r.Context()).String(),
-		TokenEndpointAuthMethodsSupported:      []string{"client_secret_post", "client_secret_basic", "private_key_jwt", "none"},
-		IDTokenSigningAlgValuesSupported:       []string{key.Algorithm},
-		IDTokenSignedResponseAlg:               []string{key.Algorithm},
-		UserinfoSignedResponseAlg:              []string{key.Algorithm},
-		GrantTypesSupported:                    []string{"authorization_code", "implicit", "client_credentials", "refresh_token"},
+		Issuer:               h.c.IssuerURL(r.Context()).String(),
+		AuthURL:              h.c.OAuth2AuthURL(r.Context()).String(),
+		TokenURL:             h.c.OAuth2TokenURL(r.Context()).String(),
+		JWKsURI:              h.c.JWKSURL(r.Context()).String(),
+		RevocationEndpoint:   urlx.AppendPaths(h.c.IssuerURL(r.Context()), RevocationPath).String(),
+		RegistrationEndpoint: h.c.OAuth2ClientRegistrationURL(r.Context()).String(),
+		SubjectTypes:         h.c.SubjectTypesSupported(r.Context()),
+		ResponseTypes: []string{
+			"code",
+			"code id_token",
+			"id_token",
+			"token id_token",
+			"token",
+			"token id_token code",
+		},
+		ClaimsSupported:  h.c.OIDCDiscoverySupportedClaims(r.Context()),
+		ScopesSupported:  h.c.OIDCDiscoverySupportedScope(r.Context()),
+		UserinfoEndpoint: h.c.OIDCDiscoveryUserinfoEndpoint(r.Context()).String(),
+		TokenEndpointAuthMethodsSupported: []string{
+			"client_secret_post",
+			"client_secret_basic",
+			"private_key_jwt",
+			"none",
+		},
+		IDTokenSigningAlgValuesSupported: []string{key.Algorithm},
+		IDTokenSignedResponseAlg:         []string{key.Algorithm},
+		UserinfoSignedResponseAlg:        []string{key.Algorithm},
+		GrantTypesSupported: []string{
+			"authorization_code",
+			"implicit",
+			"client_credentials",
+			"refresh_token",
+		},
 		ResponseModesSupported:                 []string{"query", "fragment"},
 		UserinfoSigningAlgValuesSupported:      []string{"none", key.Algorithm},
 		RequestParameterSupported:              true,
@@ -530,12 +551,14 @@ type oidcUserInfo struct {
 //	  default: errorOAuth2
 func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	session := NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(ctx))
-	tokenType, ar, err := h.r.OAuth2Provider().IntrospectToken(ctx, fosite.AccessTokenFromRequest(r), fosite.AccessToken, session)
+	session := NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(ctx), h.c.MirrorTopLevelClaims(ctx))
+	tokenType, ar, err := h.r.OAuth2Provider().
+		IntrospectToken(ctx, fosite.AccessTokenFromRequest(r), fosite.AccessToken, session)
 	if err != nil {
 		rfcerr := fosite.ErrorToRFC6749Error(err)
 		if rfcerr.StatusCode() == http.StatusUnauthorized {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s",error_description="%s"`, rfcerr.ErrorField, rfcerr.GetDescription()))
+			w.Header().
+				Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s",error_description="%s"`, rfcerr.ErrorField, rfcerr.GetDescription()))
 		}
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -543,14 +566,16 @@ func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	if tokenType != fosite.AccessToken {
 		errorDescription := "Only access tokens are allowed in the authorization header."
-		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="invalid_token",error_description="%s"`, errorDescription))
+		w.Header().
+			Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="invalid_token",error_description="%s"`, errorDescription))
 		h.r.Writer().WriteErrorCode(w, r, http.StatusUnauthorized, errors.New(errorDescription))
 		return
 	}
 
 	c, ok := ar.GetClient().(*client.Client)
 	if !ok {
-		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrServerError.WithHint("Unable to type assert to *client.Client.")))
+		h.r.Writer().
+			WriteError(w, r, errorsx.WithStack(fosite.ErrServerError.WithHint("Unable to type assert to *client.Client.")))
 		return
 	}
 
@@ -688,11 +713,13 @@ type introspectOAuth2Token struct {
 //	  200: introspectedOAuth2Token
 //	  default: errorOAuth2
 func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
+	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()), h.c.MirrorTopLevelClaims(r.Context()))
 	var ctx = r.Context()
 
 	if r.Method != "POST" {
-		err := errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("HTTP method is \"%s\", expected \"POST\".", r.Method))
+		err := errorsx.WithStack(
+			fosite.ErrInvalidRequest.WithHintf("HTTP method is \"%s\", expected \"POST\".", r.Method),
+		)
 		x.LogError(r, err, h.r.Logger())
 		h.r.OAuth2Provider().WriteIntrospectionError(ctx, w, err)
 		return
@@ -712,10 +739,14 @@ func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, 
 	tokenType := r.PostForm.Get("token_type_hint")
 	scope := r.PostForm.Get("scope")
 
-	tt, ar, err := h.r.OAuth2Provider().IntrospectToken(ctx, token, fosite.TokenType(tokenType), session, strings.Split(scope, " ")...)
+	tt, ar, err := h.r.OAuth2Provider().
+		IntrospectToken(ctx, token, fosite.TokenType(tokenType), session, strings.Split(scope, " ")...)
 	if err != nil {
 		x.LogAudit(r, err, h.r.Logger())
-		err := errorsx.WithStack(fosite.ErrInactiveToken.WithHint("An introspection strategy indicated that the token is inactive.").WithDebug(err.Error()))
+		err := errorsx.WithStack(
+			fosite.ErrInactiveToken.WithHint("An introspection strategy indicated that the token is inactive.").
+				WithDebug(err.Error()),
+		)
 		h.r.OAuth2Provider().WriteIntrospectionError(ctx, w, err)
 		return
 	}
@@ -738,7 +769,10 @@ func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, 
 
 	session, ok := resp.GetAccessRequester().GetSession().(*Session)
 	if !ok {
-		err := errorsx.WithStack(fosite.ErrServerError.WithHint("Expected session to be of type *Session, but got another type.").WithDebug(fmt.Sprintf("Got type %s", reflect.TypeOf(resp.GetAccessRequester().GetSession()))))
+		err := errorsx.WithStack(
+			fosite.ErrServerError.WithHint("Expected session to be of type *Session, but got another type.").
+				WithDebug(fmt.Sprintf("Got type %s", reflect.TypeOf(resp.GetAccessRequester().GetSession()))),
+		)
 		x.LogError(r, err, h.r.Logger())
 		h.r.OAuth2Provider().WriteIntrospectionError(ctx, w, err)
 		return
@@ -848,7 +882,7 @@ type oAuth2TokenExchange struct {
 //	  200: oAuth2TokenExchange
 //	  default: errorOAuth2
 func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
-	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
+	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()), h.c.MirrorTopLevelClaims(r.Context()))
 	var ctx = r.Context()
 
 	accessRequest, err := h.r.OAuth2Provider().NewAccessRequest(ctx, r, session)
@@ -858,7 +892,8 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if accessRequest.GetGrantTypes().ExactOne("client_credentials") || accessRequest.GetGrantTypes().ExactOne("urn:ietf:params:oauth:grant-type:jwt-bearer") {
+	if accessRequest.GetGrantTypes().ExactOne("client_credentials") ||
+		accessRequest.GetGrantTypes().ExactOne("urn:ietf:params:oauth:grant-type:jwt-bearer") {
 		var accessTokenKeyID string
 		if h.c.AccessTokenStrategy(ctx) == "jwt" {
 			accessTokenKeyID, err = h.r.AccessTokenJWTStrategy().GetPublicKeyID(ctx)
@@ -985,7 +1020,8 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 		}
 	}
 
-	obfuscatedSubject, err := h.r.ConsentStrategy().ObfuscateSubjectIdentifier(ctx, authorizeRequest.GetClient(), session.ConsentRequest.Subject, session.ConsentRequest.ForceSubjectIdentifier)
+	obfuscatedSubject, err := h.r.ConsentStrategy().
+		ObfuscateSubjectIdentifier(ctx, authorizeRequest.GetClient(), session.ConsentRequest.Subject, session.ConsentRequest.ForceSubjectIdentifier)
 	if e := &(fosite.RFC6749Error{}); errors.As(err, &e) {
 		x.LogAudit(r, err, h.r.AuditLogger())
 		h.writeAuthorizeError(w, r, authorizeRequest, err)
@@ -1032,6 +1068,7 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 		ConsentChallenge:      session.ID,
 		ExcludeNotBeforeClaim: h.c.ExcludeNotBeforeClaim(ctx),
 		AllowedTopLevelClaims: h.c.AllowedTopLevelClaims(ctx),
+		MirrorTopLevelClaims:  h.c.MirrorTopLevelClaims(ctx),
 	})
 	if err != nil {
 		x.LogError(r, err, h.r.Logger())
@@ -1070,7 +1107,8 @@ type deleteOAuth2Token struct {
 func (h *Handler) deleteOAuth2Token(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	clientID := r.URL.Query().Get("client_id")
 	if clientID == "" {
-		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(`Query parameter 'client_id' is not defined but it should have been.`)))
+		h.r.Writer().
+			WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(`Query parameter 'client_id' is not defined but it should have been.`)))
 		return
 	}
 
@@ -1102,7 +1140,8 @@ func (h *Handler) writeAuthorizeError(w http.ResponseWriter, r *http.Request, ar
 }
 
 func (h *Handler) logOrAudit(err error, r *http.Request) {
-	if errors.Is(err, fosite.ErrServerError) || errors.Is(err, fosite.ErrTemporarilyUnavailable) || errors.Is(err, fosite.ErrMisconfiguration) {
+	if errors.Is(err, fosite.ErrServerError) || errors.Is(err, fosite.ErrTemporarilyUnavailable) ||
+		errors.Is(err, fosite.ErrMisconfiguration) {
 		x.LogError(r, err, h.r.Logger())
 	} else {
 		x.LogAudit(r, err, h.r.Logger())

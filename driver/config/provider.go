@@ -89,6 +89,7 @@ const (
 	KeyExposeOAuth2Debug                         = "oauth2.expose_internal_errors"
 	KeyExcludeNotBeforeClaim                     = "oauth2.exclude_not_before_claim"
 	KeyAllowedTopLevelClaims                     = "oauth2.allowed_top_level_claims"
+	KeyMirrorTopLevelClaims                      = "oauth2.mirror_top_level_claims"
 	KeyOAuth2GrantJWTIDOptional                  = "oauth2.grant.jwt.jti_optional"
 	KeyOAuth2GrantJWTIssuedDateOptional          = "oauth2.grant.jwt.iat_optional"
 	KeyOAuth2GrantJWTMaxDuration                 = "oauth2.grant.jwt.max_ttl"
@@ -208,6 +209,10 @@ func (p *DefaultProvider) AllowedTopLevelClaims(ctx context.Context) []string {
 	return stringslice.Unique(p.getProvider(ctx).Strings(KeyAllowedTopLevelClaims))
 }
 
+func (p *DefaultProvider) MirrorTopLevelClaims(ctx context.Context) bool {
+	return p.getProvider(ctx).Bool(KeyMirrorTopLevelClaims)
+}
+
 func (p *DefaultProvider) SubjectTypesSupported(ctx context.Context) []string {
 	types := stringslice.Filter(
 		p.getProvider(ctx).StringsF(KeySubjectTypesSupported, []string{"public"}),
@@ -222,7 +227,9 @@ func (p *DefaultProvider) SubjectTypesSupported(ctx context.Context) []string {
 
 	if stringslice.Has(types, "pairwise") {
 		if p.AccessTokenStrategy(ctx) == AccessTokenJWTStrategy {
-			p.l.Warn(`The pairwise subject identifier algorithm is not supported by the JWT OAuth 2.0 Access Token Strategy and is thus being disabled. Please remove "pairwise" from oidc.subject_identifiers.supported_types" (e.g. oidc.subject_identifiers.supported_types=public) or set strategies.access_token to "opaque".`)
+			p.l.Warn(
+				`The pairwise subject identifier algorithm is not supported by the JWT OAuth 2.0 Access Token Strategy and is thus being disabled. Please remove "pairwise" from oidc.subject_identifiers.supported_types" (e.g. oidc.subject_identifiers.supported_types=public) or set strategies.access_token to "opaque".`,
+			)
 			types = stringslice.Filter(
 				types,
 				func(s string) bool {
@@ -407,7 +414,8 @@ func (p *DefaultProvider) JWKSURL(ctx context.Context) *url.URL {
 func (p *DefaultProvider) AccessTokenStrategy(ctx context.Context) AccessTokenStrategyType {
 	s, err := ToAccessTokenStrategyType(p.getProvider(ctx).String(KeyAccessTokenStrategy))
 	if err != nil {
-		p.l.WithError(err).Warn("Key `strategies.access_token` contains an invalid value, falling back to `opaque` strategy.")
+		p.l.WithError(err).
+			Warn("Key `strategies.access_token` contains an invalid value, falling back to `opaque` strategy.")
 		return AccessTokenDefaultStrategy
 	}
 

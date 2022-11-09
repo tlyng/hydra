@@ -76,6 +76,7 @@ func TestUnmarshalSession(t *testing.T) {
 			"zone",
 			"login_session_id",
 		},
+		MirrorTopLevelClaims: false,
 	}
 
 	t.Run("v1.11.8", func(t *testing.T) {
